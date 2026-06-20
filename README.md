@@ -65,15 +65,15 @@ npm run build
 ```
 这会同时编译两部分：
 1. **前端网页**：使用 Vite 构建并将优化的静态资产输出至 `dist/` 目录。
-2. **后端服务**：使用 esbuild 极速将 TypeScript 写的 `server.ts` 连带依赖全量压缩打包为单文件 `server.js`。
+2. **后端服务**：使用 esbuild 极速将 TypeScript 写的 `server.ts` 连带依赖全量压缩打包为单文件 `server.cjs`。
 
 ### 5. 生产环境运行 (激活防盗链)
 运行以下命令启动服务：
 ```bash
 # Windows (PowerShell)
-$env:NODE_ENV="production"; node server.js
+$env:NODE_ENV="production"; node server.cjs
 
 # Linux / macOS / Bash
-NODE_ENV=production node server.js
+NODE_ENV=production node server.cjs
 ```
 启动后，全栈服务器将托管在 `3000` 端口上（可通过 `PORT` 环境变量修改），此时所有的安全防盗链验证和安全下载逻辑都将完全生效。
