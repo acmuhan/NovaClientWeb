@@ -24203,42 +24203,70 @@ import_dotenv.default.config();
 var app = (0, import_express.default)();
 var PORT = process.env.PORT || 3e3;
 app.use(import_express.default.static(import_path.default.join(__dirname, "dist")));
-app.get("/api/download", (req, res) => {
+function checkReferer(req, res) {
+  if (process.env.NODE_ENV !== "production") return true;
   const referer = req.headers.referer;
   const host = req.headers.host;
-  if (process.env.NODE_ENV === "production") {
-    if (!referer) {
-      return res.status(403).send("Forbidden: No referer header provided.");
-    }
-    try {
-      const refererUrl = new URL(referer);
-      const hostName = host ? host.split(":")[0] : "";
-      const refererHost = refererUrl.hostname;
-      if (refererHost !== hostName && !refererHost.endsWith("." + hostName)) {
-        return res.status(403).send("Forbidden: Hotlinking is prohibited.");
-      }
-    } catch (error) {
-      return res.status(403).send("Forbidden: Invalid referer format.");
-    }
+  if (!referer) {
+    res.status(403).send("Forbidden: No referer header provided.");
+    return false;
   }
-  const dataDir = import_path.default.join(__dirname, "data");
-  if (!import_fs.default.existsSync(dataDir)) {
-    return res.status(404).send("Data directory not found.");
+  try {
+    const refererUrl = new URL(referer);
+    const hostName = host ? host.split(":")[0] : "";
+    const refererHost = refererUrl.hostname;
+    if (refererHost !== hostName && !refererHost.endsWith("." + hostName)) {
+      res.status(403).send("Forbidden: Hotlinking is prohibited.");
+      return false;
+    }
+  } catch {
+    res.status(403).send("Forbidden: Invalid referer format.");
+    return false;
   }
-  const files = import_fs.default.readdirSync(dataDir).filter(
-    (file) => file.toLowerCase() !== "readme.md" && !file.startsWith(".")
+  return true;
+}
+function findNewestInDir(dir) {
+  if (!import_fs.default.existsSync(dir)) return null;
+  const candidates = import_fs.default.readdirSync(dir).filter(
+    (f) => !f.startsWith(".") && f.toLowerCase() !== "readme.md"
   );
-  if (files.length === 0) {
-    return res.status(404).send("No installation packages found in data directory.");
+  if (candidates.length === 0) return null;
+  const newest = candidates.map((f) => ({ name: f, mtime: import_fs.default.statSync(import_path.default.join(dir, f)).mtimeMs })).sort((a, b) => b.mtime - a.mtime)[0];
+  return import_path.default.join(dir, newest.name);
+}
+app.get("/api/download", (req, res) => {
+  if (!checkReferer(req, res)) return;
+  const mode = process.env.VITE_PC_DOWNLOAD_MODE || "file";
+  const externalUrl = process.env.VITE_PC_DOWNLOAD_URL;
+  if (mode === "link") {
+    if (!externalUrl) return void res.status(500).send("PC download URL not configured.");
+    return void res.redirect(externalUrl);
   }
-  const fileName = files[0];
-  const filePath = import_path.default.join(dataDir, fileName);
-  res.download(filePath, fileName, (error) => {
-    if (error) {
-      console.error("File download failed:", error);
-      if (!res.headersSent) {
-        res.status(500).send("Error occurred while downloading file.");
-      }
+  const dir = import_path.default.join(__dirname, process.env.VITE_PC_DOWNLOAD_DIR || "data/pc");
+  const filePath = findNewestInDir(dir);
+  if (!filePath) return void res.status(404).send(`No PC installation package found in ${dir}.`);
+  res.download(filePath, import_path.default.basename(filePath), (err) => {
+    if (err) {
+      console.error("PC file download failed:", err);
+      if (!res.headersSent) res.status(500).send("Error occurred while downloading file.");
+    }
+  });
+});
+app.get("/api/download/android", (req, res) => {
+  if (!checkReferer(req, res)) return;
+  const mode = process.env.VITE_ANDROID_DOWNLOAD_MODE || "link";
+  const externalUrl = process.env.VITE_ANDROID_DOWNLOAD_URL;
+  if (mode === "link") {
+    if (!externalUrl) return void res.status(500).send("Android download URL not configured.");
+    return void res.redirect(externalUrl);
+  }
+  const dir = import_path.default.join(__dirname, process.env.VITE_ANDROID_DOWNLOAD_DIR || "data/android");
+  const filePath = findNewestInDir(dir);
+  if (!filePath) return void res.status(404).send(`No Android package found in ${dir}.`);
+  res.download(filePath, import_path.default.basename(filePath), (err) => {
+    if (err) {
+      console.error("Android file download failed:", err);
+      if (!res.headersSent) res.status(500).send("Error occurred while downloading file.");
     }
   });
 });

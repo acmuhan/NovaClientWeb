@@ -11,60 +11,107 @@ const PORT = process.env.PORT || 3000;
 // 静态托管前端打包目录
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// 带有防盗链和下载路径隐藏的下载 API
-app.get('/api/download', (req, res) => {
+/**
+ * 防盗链检查：生产环境下校验 Referer 是否来自本站。
+ * 返回 true 表示通过，false 表示已向客户端发送 403 响应。
+ */
+function checkReferer(req: express.Request, res: express.Response): boolean {
+  if (process.env.NODE_ENV !== 'production') return true;
+
   const referer = req.headers.referer;
   const host = req.headers.host;
 
-  // 1. 防盗链逻辑
-  // 生产环境下进行 referer 来源域名验证，非本站域名请求予以拦截（403）
-  if (process.env.NODE_ENV === 'production') {
-    if (!referer) {
-      return res.status(403).send('Forbidden: No referer header provided.');
-    }
-
-    try {
-      const refererUrl = new URL(referer);
-      const hostName = host ? host.split(':')[0] : '';
-      const refererHost = refererUrl.hostname;
-
-      // 允许主域名及子域名访问，防止跨域盗链
-      if (refererHost !== hostName && !refererHost.endsWith('.' + hostName)) {
-        return res.status(403).send('Forbidden: Hotlinking is prohibited.');
-      }
-    } catch (error) {
-      return res.status(403).send('Forbidden: Invalid referer format.');
-    }
+  if (!referer) {
+    res.status(403).send('Forbidden: No referer header provided.');
+    return false;
   }
 
-  // 2. 隐藏真实物理路径
-  // 下载包存放在服务器本地的 data 目录中（此目录不配置 express.static）
-  const dataDir = path.join(__dirname, 'data');
+  try {
+    const refererUrl = new URL(referer);
+    const hostName = host ? host.split(':')[0] : '';
+    const refererHost = refererUrl.hostname;
 
-  if (!fs.existsSync(dataDir)) {
-    return res.status(404).send('Data directory not found.');
+    if (refererHost !== hostName && !refererHost.endsWith('.' + hostName)) {
+      res.status(403).send('Forbidden: Hotlinking is prohibited.');
+      return false;
+    }
+  } catch {
+    res.status(403).send('Forbidden: Invalid referer format.');
+    return false;
   }
 
-  // 获取 data 文件夹下排除 README.md 后可供下载的安装包文件
-  const files = fs.readdirSync(dataDir).filter(
-    (file) => file.toLowerCase() !== 'readme.md' && !file.startsWith('.')
+  return true;
+}
+
+/**
+ * 在指定目录中查找修改时间最新的文件（排除隐藏文件和 readme.md）。
+ * @param dir 绝对路径目录
+ */
+function findNewestInDir(dir: string): string | null {
+  if (!fs.existsSync(dir)) return null;
+
+  const candidates = fs.readdirSync(dir).filter(
+    (f) => !f.startsWith('.') && f.toLowerCase() !== 'readme.md'
   );
 
-  if (files.length === 0) {
-    return res.status(404).send('No installation packages found in data directory.');
+  if (candidates.length === 0) return null;
+
+  // 按文件修改时间降序排序，取最新的一个
+  const newest = candidates
+    .map((f) => ({ name: f, mtime: fs.statSync(path.join(dir, f)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime)[0];
+
+  return path.join(dir, newest.name);
+}
+
+// ─── PC 下载 ──────────────────────────────────────────────────────────────────
+// file 模式：从 VITE_PC_DOWNLOAD_DIR 目录（默认 data/pc）提供最新文件
+// link 模式：302 重定向至 VITE_PC_DOWNLOAD_URL
+app.get('/api/download', (req, res) => {
+  if (!checkReferer(req, res)) return;
+
+  const mode = process.env.VITE_PC_DOWNLOAD_MODE || 'file';
+  const externalUrl = process.env.VITE_PC_DOWNLOAD_URL;
+
+  if (mode === 'link') {
+    if (!externalUrl) return void res.status(500).send('PC download URL not configured.');
+    return void res.redirect(externalUrl);
   }
 
-  // 默认下载目录中的第一个包文件
-  const fileName = files[0];
-  const filePath = path.join(dataDir, fileName);
+  const dir = path.join(__dirname, process.env.VITE_PC_DOWNLOAD_DIR || 'data/pc');
+  const filePath = findNewestInDir(dir);
+  if (!filePath) return void res.status(404).send(`No PC installation package found in ${dir}.`);
 
-  // 3. 以流形式向前端输出附件，强行唤起浏览器下载，不暴露或跳转文件物理路径
-  res.download(filePath, fileName, (error) => {
-    if (error) {
-      console.error('File download failed:', error);
-      if (!res.headersSent) {
-        res.status(500).send('Error occurred while downloading file.');
-      }
+  res.download(filePath, path.basename(filePath), (err) => {
+    if (err) {
+      console.error('PC file download failed:', err);
+      if (!res.headersSent) res.status(500).send('Error occurred while downloading file.');
+    }
+  });
+});
+
+// ─── Android 下载 ─────────────────────────────────────────────────────────────
+// file 模式：从 VITE_ANDROID_DOWNLOAD_DIR 目录（默认 data/android）提供最新文件
+// link 模式：302 重定向至 VITE_ANDROID_DOWNLOAD_URL
+app.get('/api/download/android', (req, res) => {
+  if (!checkReferer(req, res)) return;
+
+  const mode = process.env.VITE_ANDROID_DOWNLOAD_MODE || 'link';
+  const externalUrl = process.env.VITE_ANDROID_DOWNLOAD_URL;
+
+  if (mode === 'link') {
+    if (!externalUrl) return void res.status(500).send('Android download URL not configured.');
+    return void res.redirect(externalUrl);
+  }
+
+  const dir = path.join(__dirname, process.env.VITE_ANDROID_DOWNLOAD_DIR || 'data/android');
+  const filePath = findNewestInDir(dir);
+  if (!filePath) return void res.status(404).send(`No Android package found in ${dir}.`);
+
+  res.download(filePath, path.basename(filePath), (err) => {
+    if (err) {
+      console.error('Android file download failed:', err);
+      if (!res.headersSent) res.status(500).send('Error occurred while downloading file.');
     }
   });
 });

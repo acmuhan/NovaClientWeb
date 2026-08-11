@@ -1,12 +1,14 @@
 import { motion, Variants } from 'motion/react';
+import type { LucideIcon } from 'lucide-react';
 
 interface LinkButtonProps {
   href: string;
   label: string;
+  icon?: LucideIcon;
   variants?: Variants;
 }
 
-export default function LinkButton({ href, label, variants }: LinkButtonProps) {
+export default function LinkButton({ href, label, icon: Icon, variants }: LinkButtonProps) {
   return (
     <motion.a
       href={href}
@@ -26,6 +28,7 @@ export default function LinkButton({ href, label, variants }: LinkButtonProps) {
       {/* MD3 Hover/Pressed State Layer Overlay */}
       <span className="absolute inset-0 bg-[var(--md-on-primary-container)] opacity-0 group-hover:opacity-[0.08] group-active:opacity-[0.12] transition-opacity duration-200"></span>
       <span className="relative z-10 flex items-center justify-center gap-2 tracking-[0.05em]">
+        {Icon && <Icon size={18} />}
         {label}
       </span>
     </motion.a>

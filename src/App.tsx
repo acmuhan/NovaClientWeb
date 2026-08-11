@@ -104,6 +104,7 @@ export default function App() {
                   key={i}
                   href={link.href}
                   label={link.label}
+                  icon={link.icon}
                   variants={itemVariants}
                 />
               ))}
